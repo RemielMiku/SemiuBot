@@ -1,8 +1,12 @@
+# ignore env files
 .env
+.env.bak
 
+# ignore cache and compiled files
 __pycache__/
 *.pyc
 *.pyo
+
+# ignore the database and log
 *.db
 *.log
-.env.bak
