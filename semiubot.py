@@ -88,6 +88,8 @@ role_group = app_commands.Group(
 
 @role_group.command(name="claim", description="Claim your own custom role")
 async def claim(interaction: discord.Interaction, role_name: str = None):
+        await interaction.response.defer(ephemeral=True)
+
         guild = interaction.guild
         member = interaction.user
 
@@ -186,6 +188,8 @@ async def claim(interaction: discord.Interaction, role_name: str = None):
 
 @role_group.command(name="delete", description="Delete your custom role")
 async def delete(interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        
         guild = interaction.guild
         member = interaction.user
 
@@ -259,6 +263,8 @@ async def delete(interaction: discord.Interaction):
 
 @role_group.command(name="name", description="Change the name of your custom role")
 async def name(interaction: discord.Interaction, new_name: str = None):
+        await interaction.response.defer(ephemeral=True)
+        
         member = interaction.user
         guild = interaction.guild
         
@@ -317,6 +323,8 @@ async def name(interaction: discord.Interaction, new_name: str = None):
 
 @role_group.command(name="color", description="Change the color of your custom role to a flat color")
 async def color(interaction: discord.Interaction, hex_color: str):
+        await interaction.response.defer(ephemeral=True)
+        
         member = interaction.user
         guild = interaction.guild
 
@@ -388,6 +396,8 @@ async def color(interaction: discord.Interaction, hex_color: str):
 
 @role_group.command(name="icon", description="Change the icon of your custom role")
 async def icon(interaction: discord.Interaction, image: discord.Attachment = None):
+        await interaction.response.defer(ephemeral=True)
+        
         member = interaction.user
         guild = interaction.guild
         
@@ -478,6 +488,8 @@ async def icon(interaction: discord.Interaction, image: discord.Attachment = Non
 
 @role_group.command(name="gradient", description="Change the color of your custom role to a gradient")
 async def gradient(interaction: discord.Interaction, color1: str = None, color2: str = None):
+        await interaction.response.defer(ephemeral=True)
+        
         member = interaction.user
         guild = interaction.guild
         
