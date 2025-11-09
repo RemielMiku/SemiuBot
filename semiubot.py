@@ -15,7 +15,6 @@ threading.Thread(target=run).start()
 # --- end keep-alive web server ---
 
 ### python semiubot.py
-from distutils.dep_util import newer_group
 import os
 import sqlite3
 import aiohttp
