@@ -16,8 +16,6 @@ threading.Thread(target=run).start()
 
 ### python semiubot.py
 import os
-import sqlite3
-import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -33,16 +31,19 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="s!", intents=intents)
 tree = bot.tree
 
-# Create (or connect to) a database file
-conn = sqlite3.connect("custom_roles.db")
+# Connect to a database file
+import psycopg2
+import os
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+conn = psycopg2.connect(DATABASE_URL)
 c = conn.cursor()
 
-# Create a table for storing custom roles
 c.execute("""
 CREATE TABLE IF NOT EXISTS roles (
-    user_id INTEGER PRIMARY KEY,
-    guild_id INTEGER NOT NULL,
-    role_id INTEGER NOT NULL,
+    user_id BIGINT PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    role_id BIGINT NOT NULL,
     role_name TEXT NOT NULL
 )
 """)
@@ -104,7 +105,7 @@ async def claim(interaction: discord.Interaction, role_name: str = None):
         if role_name is None:
             role_name = f"{member.display_name}'s Role"
 
-        c.execute("SELECT role_id FROM roles WHERE user_id = ?", (member.id,))
+        c.execute("SELECT role_id FROM roles WHERE user_id = %s", (member.id,))
         result = c.fetchone()
 
         ### Check database for existing role
@@ -128,7 +129,7 @@ async def claim(interaction: discord.Interaction, role_name: str = None):
                 return
             else:
                 # User does not have role, delete from database
-                c.execute("DELETE FROM roles WHERE user_id = ?", (member.id,))
+                c.execute("DELETE FROM roles WHERE user_id = %s", (member.id,))
                 conn.commit()
 
         ### Create role
@@ -161,7 +162,7 @@ async def claim(interaction: discord.Interaction, role_name: str = None):
         ### Store role in database
 
         c.execute(
-            "INSERT INTO roles (user_id, guild_id, role_id, role_name) VALUES (?, ?, ?, ?)",
+            "INSERT INTO roles (user_id, guild_id, role_id, role_name) VALUES (%s, %s, %s, %s)",
             (member.id, guild.id, new_role.id, new_role.name)
         )
         conn.commit()
@@ -189,7 +190,7 @@ async def delete(interaction: discord.Interaction):
         member = interaction.user
 
         ### Look up the role in database
-        c.execute("SELECT role_id FROM roles WHERE user_id = ?", (member.id,))
+        c.execute("SELECT role_id FROM roles WHERE user_id = %s", (member.id,))
         result = c.fetchone()
 
         ### No custom role detected
@@ -219,7 +220,7 @@ async def delete(interaction: discord.Interaction):
                 )
                 embed.set_author(name="Role successfully deleted!", icon_url=interaction.user.display_avatar.url)
                 embed.set_footer(text="/help for commands list")
-                c.execute("DELETE FROM roles WHERE user_id = ?", (member.id,))
+                c.execute("DELETE FROM roles WHERE user_id = %s", (member.id,))
                 conn.commit()
         
                 await interaction.response.send_message(embed=embed)
@@ -253,7 +254,7 @@ async def delete(interaction: discord.Interaction):
             embed.set_footer(text="/help for commands list")
         
             await interaction.response.send_message(embed=embed, ephemeral=True)
-            c.execute("DELETE FROM roles WHERE user_id = ?", (member.id,))
+            c.execute("DELETE FROM roles WHERE user_id = %s", (member.id,))
             conn.commit()
 
 @role_group.command(name="name", description="Change the name of your custom role")
@@ -262,7 +263,7 @@ async def name(interaction: discord.Interaction, new_name: str = None):
         guild = interaction.guild
         
         ### Look up the role in database
-        c.execute("SELECT role_id FROM roles WHERE user_id = ?", (member.id,))
+        c.execute("SELECT role_id FROM roles WHERE user_id = %s", (member.id,))
         result = c.fetchone()
 
         ### No custom role detected
@@ -280,7 +281,7 @@ async def name(interaction: discord.Interaction, new_name: str = None):
         role = guild.get_role(result[0])
         if not role:
             ### Role was deleted manually, clean database
-            c.execute("DELETE FROM roles WHERE user_id = ?", (member.id,))
+            c.execute("DELETE FROM roles WHERE user_id = %s", (member.id,))
             conn.commit()
             embed = discord.Embed(
                 description="❌ Your custom role no longer exists.\n> * Use `/role claim <name>` to claim a new one.",
@@ -294,7 +295,7 @@ async def name(interaction: discord.Interaction, new_name: str = None):
         ### change role name
         try:
             await role.edit(name=new_name)
-            c.execute("UPDATE roles SET role_name = ? WHERE user_id = ?", (new_name, member.id))
+            c.execute("UPDATE roles SET role_name = %s WHERE user_id = %s", (new_name, member.id))
             conn.commit()
             embed = discord.Embed(
                 description=f"✅ Your role name has been updated to **{new_name}**!",
@@ -320,7 +321,7 @@ async def color(interaction: discord.Interaction, hex_color: str):
         guild = interaction.guild
 
         ### Look up the role in database
-        c.execute("SELECT role_id FROM roles WHERE user_id = ?", (member.id,))
+        c.execute("SELECT role_id FROM roles WHERE user_id = %s", (member.id,))
         result = c.fetchone()
 
         ### No custom role detected
@@ -338,7 +339,7 @@ async def color(interaction: discord.Interaction, hex_color: str):
         role = guild.get_role(result[0])
         if not role:
             ### Role was deleted manually, clean database
-            c.execute("DELETE FROM roles WHERE user_id = ?", (member.id,))
+            c.execute("DELETE FROM roles WHERE user_id = %s", (member.id,))
             conn.commit()
             embed = discord.Embed(
                 description="❌ Your custom role no longer exists.\n> * Use `/role claim <name>` to claim a new one.",
@@ -402,7 +403,7 @@ async def icon(interaction: discord.Interaction, image: discord.Attachment = Non
             return
 
         ### Look up the role in database
-        c.execute("SELECT role_id FROM roles WHERE user_id = ?", (member.id,))
+        c.execute("SELECT role_id FROM roles WHERE user_id = %s", (member.id,))
         result = c.fetchone()
 
         ### No custom role detected
@@ -420,7 +421,7 @@ async def icon(interaction: discord.Interaction, image: discord.Attachment = Non
         role = guild.get_role(result[0])
         if not role:
             ### Role was deleted manually, clean database
-            c.execute("DELETE FROM roles WHERE user_id = ?", (member.id,))
+            c.execute("DELETE FROM roles WHERE user_id = %s", (member.id,))
             conn.commit()
             embed = discord.Embed(
                 description="❌ Your custom role no longer exists.\n> * Use `/role claim <name>` to claim a new one.",
@@ -493,7 +494,7 @@ async def gradient(interaction: discord.Interaction, color1: str = None, color2:
             return
 
         ### Look up the role in database
-        c.execute("SELECT role_id FROM roles WHERE user_id = ?", (member.id,))
+        c.execute("SELECT role_id FROM roles WHERE user_id = %s", (member.id,))
         result = c.fetchone()
 
         ### No custom role detected
@@ -512,7 +513,7 @@ async def gradient(interaction: discord.Interaction, color1: str = None, color2:
         role = guild.get_role(result[0])
         if not role:
             ### Role was deleted manually, clean database
-            c.execute("DELETE FROM roles WHERE user_id = ?", (member.id,))
+            c.execute("DELETE FROM roles WHERE user_id = %s", (member.id,))
             conn.commit()
             embed = discord.Embed(
                 description="❌ Your custom role no longer exists.\n> * Use `/role claim <name>` to claim a new one.",
