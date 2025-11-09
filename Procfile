@@ -1,1 +1,1 @@
-worker: python semiubot.py
+web: python semiubot.py
