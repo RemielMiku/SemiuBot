@@ -4,7 +4,7 @@ import os
 import sqlite3
 import aiohttp
 import discord
-#from discord import app_commands
+from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
 
@@ -33,14 +33,542 @@ CREATE TABLE IF NOT EXISTS roles (
 """)
 conn.commit()
 
-@bot.command() 
-async def hello(ctx): 
-    await ctx.send(f'Hello {ctx.author.display_name}! 👋')
+### DEV OVERRIDE
+TESTER_ID = 393891661349912586
 
-#@bot.event
-#async def on_ready():
-#    await tree.sync()
-#    print(f"tree.sync() SLASH COMMANDS SYNCED ({len(tree.get_commands())} commands)\n\n[ SEMIU IS ONLINE ]\n")
+GUILD_IDS = [1436430586226016453, 1348602178696380487]
+
+@tree.command(name="hello", description="Say hello to Semiu!")
+async def hello(interaction: discord.Interaction):
+    await interaction.response.send_message(f'Hello {interaction.user.display_name}! 👋')
+
+@tree.command(name="help", description="Show all available commands")
+async def help_command(interaction: discord.Interaction):
+    embed = discord.Embed(
+    description=
+    "> * Use `/help` to show all available commands\n"
+    "> * Use `/hello` to say hi to Semiu\n"
+    "> * Use `/role claim <name>` to claim a custom role\n"
+    "> * Use `/role name <name>` to change the role name\n"
+    "> * Use `/role color <hex color>` to change the role color\n"
+    "> * Use `/role gradient <hex color> <hex color>` to change the role color to a gradient\n"
+    "> * Use `/role delete` to delete your custom role\n"
+    "> * Use `/role icon <image>` to change the role icon",
+    colour=0xca7648
+    )
+    embed.set_author(name="Here is the commands list", icon_url=interaction.user.display_avatar.url)
+    embed.set_footer(text="/help for commands list")
+    
+    await interaction.response.send_message(embed=embed)
+
+#########################
+##### ROLE COMMANDS #####
+#########################
+
+role_group = app_commands.Group(
+    name="role",
+    description="Manage your custom role"
+)
+
+@role_group.command(name="claim", description="Claim your own custom role")
+async def claim(interaction: discord.Interaction, role_name: str = None):
+        guild = interaction.guild
+        member = interaction.user
+
+        ### CHECK IF MEMBER IS A SERVER BOOSTER
+        if not member.premium_since and member.id != TESTER_ID:
+            embed = discord.Embed(
+                description="❌ You need to be a **Server Booster** to claim a custom role!",
+                colour=0xff0000
+            )
+            embed.set_author(name="Server boost Required")
+            embed.set_footer(text="Boost the server to claim your custom role")
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+
+        if role_name is None:
+            role_name = f"{member.display_name}'s Role"
+
+        c.execute("SELECT role_id FROM roles WHERE user_id = ?", (member.id,))
+        result = c.fetchone()
+
+        ### Check database for existing role
+        if result:
+            existing_role = guild.get_role(result[0])
+            if existing_role:
+                embed = discord.Embed(
+                    #title=" Custom role already claimed!",
+                    description=f"❌ You already have a custom role: @{existing_role.name}\n"
+                    "> * Use `/role name <name>` to change the role name\n"
+                    "> * Use `/role color <hex color>` to change the role color\n"
+                    "> * Use `/role gradient <hex color> <hex color>` to change the role color to a gradient\n"
+                    "> * Use `/role delete` to delete your custom role\n"
+                    "> * Use `/role icon <image>` to change the role icon",
+                    colour=0xff0000
+                )
+                embed.set_author(name="ERROR: Custom role already claimed!")
+                embed.set_footer(text="/help for commands list")
+        
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+                return
+            else:
+                # User does not have role, delete from database
+                c.execute("DELETE FROM roles WHERE user_id = ?", (member.id,))
+                conn.commit()
+
+        ### Create role
+        new_role = await guild.create_role(
+            name=role_name,
+            colour=discord.Color.random(),
+            hoist=False,
+            mentionable=False
+        )
+
+        ### WILL LOOK FOR A ROLE CALLED "SERVER BOOSTER". WILL NOT WORK WITH OTHER ROLE NAMES. KEEP IN MIND.
+        booster_role = discord.utils.find(
+            lambda r: "server booster" in r.name.lower(),
+            guild.roles
+        )
+
+        if booster_role:
+            try:
+                await guild.fetch_roles()
+                target_position = min(booster_role.position+1, guild.me.top_role.position-1)
+                await new_role.edit(position=target_position)
+            except discord.Forbidden:
+                print("`ERROR: NO PERMISSION TO MOVE ROLE. GRANT RELEVANT PERMISSIONS.`")
+        else:
+            print('`NO SERVER BOOSTER ROLE FOUND. SERVER BOOSTER ROLE REQUIRED. OTHERWISE TRY RENAMING THE SERVER BOOSTER ROLE `"Server Booster"')
+
+        ### Give role to member
+        await member.add_roles(new_role)
+
+        ### Store role in database
+
+        c.execute(
+            "INSERT INTO roles (user_id, guild_id, role_id, role_name) VALUES (?, ?, ?, ?)",
+            (member.id, guild.id, new_role.id, new_role.name)
+        )
+        conn.commit()
+
+        ### Claim message
+        embed = discord.Embed(
+            #title="Custom role claimed!",
+            description=f"Thank you for boosting **{guild.name}**, {interaction.user.display_name}!\n"
+            "Here is your own custom role! 🎉\n"
+            "> * Use `/role name <name>` to change the role name\n"
+            "> * Use `/role color <hex color>` to change the role color\n"
+            "> * Use `/role gradient <hex color> <hex color>` to change the role color to a gradient\n"
+            "> * Use `/role delete` to delete your custom role\n"
+            "> * Use `/role icon <image>` to change the role icon",
+            colour=0xca7648
+        )
+        embed.set_author(name=f"{interaction.user.display_name} has claimed a custom role!", icon_url=interaction.user.display_avatar.url)
+        embed.set_footer(text="/help for commands list")
+        
+        await interaction.response.send_message(embed=embed)
+
+@role_group.command(name="delete", description="Delete your custom role")
+async def delete(interaction: discord.Interaction):
+        guild = interaction.guild
+        member = interaction.user
+
+        ### Look up the role in database
+        c.execute("SELECT role_id FROM roles WHERE user_id = ?", (member.id,))
+        result = c.fetchone()
+
+        ### No custom role detected
+        if not result:
+                embed = discord.Embed(
+                description="❌ No custom role was detected\n"
+                    "> * Use `/role claim <name>` to claim a custom role!",
+                    colour=0xff0000
+                )
+                embed.set_author(name="ERROR: No custom role detected!")
+                embed.set_footer(text="/help for commands list")
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+                return
+        
+        ### role exists
+        role_id = result[0]
+        role = guild.get_role(role_id)
+
+        if role:
+            try:
+                await member.remove_roles(role)
+                await role.delete()
+                embed = discord.Embed(
+                    description=f'Your custom role "{role.name}", has been successfully deleted!\n'
+                    "> * Use `/role claim <name>` to claim a new custom role",
+                    colour=0x00ff00
+                )
+                embed.set_author(name="Role successfully deleted!", icon_url=interaction.user.display_avatar.url)
+                embed.set_footer(text="/help for commands list")
+                c.execute("DELETE FROM roles WHERE user_id = ?", (member.id,))
+                conn.commit()
+        
+                await interaction.response.send_message(embed=embed)
+            except discord.Forbidden:
+                embed = discord.Embed(
+                    description="❌ I do not have permission to edit your role!\n"
+                    "Please ask a moderator give me the correct permission/",
+                    colour=0xff0000
+                )
+                embed.set_author(name="Error: Permission denied!")
+                embed.set_footer(text="/help for commands list")
+        
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+            except discord.HTTPException:
+                embed = discord.Embed(
+                    description="❌ Your role could not be deleted, please try again later",
+                    colour=0xff0000
+                )
+                embed.set_author(name="Error: HTTP ERROR")
+                embed.set_footer(text="/help for commands list")
+        
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+        
+        else:
+            embed = discord.Embed(
+                    description="❌ Your role was already deleted manually\n"
+                    "> * Use `/role claim <name>` to claim a new custom role",
+                    colour=0xff0000
+                )
+            embed.set_author(name="Role was already deleted!", icon_url=interaction.user.display_avatar.url)
+            embed.set_footer(text="/help for commands list")
+        
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            c.execute("DELETE FROM roles WHERE user_id = ?", (member.id,))
+            conn.commit()
+
+@role_group.command(name="name", description="Change the name of your custom role")
+async def name(interaction: discord.Interaction, new_name: str = None):
+        member = interaction.user
+        guild = interaction.guild
+        
+        ### Look up the role in database
+        c.execute("SELECT role_id FROM roles WHERE user_id = ?", (member.id,))
+        result = c.fetchone()
+
+        ### No custom role detected
+        if not result:
+                embed = discord.Embed(
+                description="❌ No custom role was detected\n"
+                    "> * Use `/role claim <name>` to claim a custom role!",
+                    colour=0xff0000
+                )
+                embed.set_author(name="ERROR: No custom role detected!")
+                embed.set_footer(text="/help for commands list")
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+                return
+        
+        role = guild.get_role(result[0])
+        if not role:
+            ### Role was deleted manually, clean database
+            c.execute("DELETE FROM roles WHERE user_id = ?", (member.id,))
+            conn.commit()
+            embed = discord.Embed(
+                description="❌ Your custom role no longer exists.\n> * Use `/role claim <name>` to claim a new one.",
+                colour=0xff0000
+            )
+            embed.set_author(name="ERROR: Role not found!")
+            embed.set_footer(text="/help for commands list")
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+        
+        ### change role name
+        try:
+            await role.edit(name=new_name)
+            c.execute("UPDATE roles SET role_name = ? WHERE user_id = ?", (new_name, member.id))
+            conn.commit()
+            embed = discord.Embed(
+                description=f"✅ Your role name has been updated to **{new_name}**!",
+                colour=0xca7648
+            )
+            embed.set_author(name="Role name updated!", icon_url=interaction.user.display_avatar.url)
+            embed.set_footer(text="/help for commands list")
+            await interaction.response.send_message(embed=embed)
+            
+        except discord.Forbidden:
+            embed = discord.Embed(
+                description="❌ I do not have permission to edit your role!\n"
+                "Please ask a moderator give me the correct permission/",
+                colour=0xff0000
+            )
+            embed.set_author(name="ERROR: Permission denied!")
+            embed.set_footer(text="/help for commands list")
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@role_group.command(name="color", description="Change the color of your custom role to a flat color")
+async def color(interaction: discord.Interaction, hex_color: str):
+        member = interaction.user
+        guild = interaction.guild
+
+        ### Look up the role in database
+        c.execute("SELECT role_id FROM roles WHERE user_id = ?", (member.id,))
+        result = c.fetchone()
+
+        ### No custom role detected
+        if not result:
+                embed = discord.Embed(
+                description="❌ No custom role was detected\n"
+                    "> * Use `/role claim <name>` to claim a custom role!",
+                    colour=0xff0000
+                )
+                embed.set_author(name="ERROR: No custom role detected!")
+                embed.set_footer(text="/help for commands list")
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+                return
+        
+        role = guild.get_role(result[0])
+        if not role:
+            ### Role was deleted manually, clean database
+            c.execute("DELETE FROM roles WHERE user_id = ?", (member.id,))
+            conn.commit()
+            embed = discord.Embed(
+                description="❌ Your custom role no longer exists.\n> * Use `/role claim <name>` to claim a new one.",
+                colour=0xff0000
+            )
+            embed.set_author(name="ERROR: Role not found!")
+            embed.set_footer(text="/help for commands list")
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+        
+    ### Convert the hex string into a discord.Color
+        try:
+            if hex_color.startswith("#"):
+                hex_color = hex_color[1:]
+            color_value = discord.Color(int(hex_color, 16))
+        except ValueError:
+            embed = discord.Embed(
+                description='❌ Invalid color format! Use the hexadecimal color format.\nIt should look something like "#FF5733".',
+                colour=0xff0000
+            )
+            embed.set_author(name="ERROR: Invalid color format!")
+            embed.set_footer(text="/help for commands list")
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+        
+        ### Change role color
+        try:
+            await role.edit(colour=color_value)
+            embed = discord.Embed(
+                description=f"✅ Your role color has been updated to **#{hex_color.upper()}**!",
+                colour=color_value
+            )
+            embed.set_author(name="Role color updated!", icon_url=interaction.user.display_avatar.url)
+            embed.set_footer(text="/help for commands list")
+            await interaction.response.send_message(embed=embed)
+
+        except discord.Forbidden:
+            embed = discord.Embed(
+                description="I do not have permission to edit your role!\n"
+                "Please ask a moderator give me the correct permission/",
+                colour=0xff0000
+            )
+            embed.set_author(name="ERROR: Permission denied!")
+            embed.set_footer(text="/help for commands list")
+            await interaction.response.send_message(embed=embed)
+
+@role_group.command(name="icon", description="Change the icon of your custom role")
+async def icon(interaction: discord.Interaction, image: discord.Attachment = None):
+        member = interaction.user
+        guild = interaction.guild
+        
+        ### Check if server is boosted enough
+        if guild.premium_tier < 2:
+            embed = discord.Embed(
+                description="❌ This server must be **boost level 2 or higher** to use role icons.",
+                colour=0xff0000
+            )
+            embed.set_author(name="Cannot set role icon")
+            embed.set_footer(text="/help for commands list")
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+
+        ### Look up the role in database
+        c.execute("SELECT role_id FROM roles WHERE user_id = ?", (member.id,))
+        result = c.fetchone()
+
+        ### No custom role detected
+        if not result:
+                embed = discord.Embed(
+                description="❌ No custom role was detected\n"
+                    "> * Use `/role claim <name>` to claim a custom role!",
+                    colour=0xff0000
+                )
+                embed.set_author(name="ERROR: No custom role detected!")
+                embed.set_footer(text="/help for commands list")
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+                return
+        
+        role = guild.get_role(result[0])
+        if not role:
+            ### Role was deleted manually, clean database
+            c.execute("DELETE FROM roles WHERE user_id = ?", (member.id,))
+            conn.commit()
+            embed = discord.Embed(
+                description="❌ Your custom role no longer exists.\n> * Use `/role claim <name>` to claim a new one.",
+                colour=0xff0000
+            )
+            embed.set_author(name="ERROR: Role not found!")
+            embed.set_footer(text="/help for commands list")
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+        
+        ### CHECK IF THERE IS IMAGE
+        if not image:
+            embed = discord.Embed(
+                description="❌ Please provide an image URL or attachment to set as your role icon.",
+                colour=0xff0000
+            )
+            embed.set_author(name="No image provided")
+            embed.set_footer(text="/help for commands list")
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+        
+        ### SET IMAGE
+        try:
+            image_bytes = await image.read()
+            await role.edit(icon=image_bytes)
+            embed = discord.Embed(
+                description=f"✅ Your role icon has been updated!",    
+                colour=0x00ff00
+            )
+            embed.set_author(name="Role icon updated", icon_url=interaction.user.display_avatar.url)
+            embed.set_footer(text="/help for commands list")
+            await interaction.response.send_message(embed=embed)
+
+        except discord.Forbidden:
+            embed = discord.Embed(
+                    description="❌ I do not have permission to edit your role!\n"
+                    "Please ask a moderator give me the correct permission/",
+                    colour=0xff0000
+                )
+            embed.set_author(name="Error: Permission denied!")
+            embed.set_footer(text="/help for commands list")
+
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+        
+        except discord.HTTPException:
+                embed = discord.Embed(
+                    description="❌ Your role could not be updated. Please make sure the image is valid and try again",
+                    colour=0xff0000
+                )
+                embed.set_author(name="Error: HTTP ERROR")
+                embed.set_footer(text="/help for commands list")
+        
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@role_group.command(name="gradient", description="Change the color of your custom role to a gradient")
+async def gradient(interaction: discord.Interaction, color1: str = None, color2: str = None):
+        member = interaction.user
+        guild = interaction.guild
+        
+        ### Check if server is boosted enough
+        if guild.premium_tier < 2:
+            embed = discord.Embed(
+                description="❌ This server must be **boost level 3 ** to use role gradients.",
+                colour=0xff0000
+            )
+            embed.set_author(name="Cannot set role icon")
+            embed.set_footer(text="/help for commands list")
+            
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+
+        ### Look up the role in database
+        c.execute("SELECT role_id FROM roles WHERE user_id = ?", (member.id,))
+        result = c.fetchone()
+
+        ### No custom role detected
+        if not result:
+                embed = discord.Embed(
+                description="❌ No custom role was detected\n"
+                    "> * Use `/role claim <name>` to claim a custom role!",
+                    colour=0xff0000
+                )
+                embed.set_author(name="ERROR: No custom role detected!")
+                embed.set_footer(text="/help for commands list")
+                
+                await interaction.response.send_message(embed=embed)
+                return
+        
+        role = guild.get_role(result[0])
+        if not role:
+            ### Role was deleted manually, clean database
+            c.execute("DELETE FROM roles WHERE user_id = ?", (member.id,))
+            conn.commit()
+            embed = discord.Embed(
+                description="❌ Your custom role no longer exists.\n> * Use `/role claim <name>` to claim a new one.",
+                colour=0xff0000
+            )
+            embed.set_author(name="ERROR: Role not found!")
+            embed.set_footer(text="/help for commands list")
+            
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+        
+        ### Convert hex strings to integers
+        try:
+            if color1.startswith("#"): color1 = color1[1:]
+            if color2.startswith("#"): color2 = color2[1:]
+            gradient_color = discord.Color.from_gradient(int(color1, 16), int(color2, 16))
+        except ValueError:
+            embed = discord.Embed(
+                description='❌ Invalid color format! Use the hexadecimal color format.\nIt should look something like "#FF5733".',
+                colour=0xff0000
+            )
+            embed.set_author(name="ERROR: Invalid color format!")
+            embed.set_footer(text="/help for commands list")
+            
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+
+        ### change role color to a gradient using the two hexadecimal values that the user has entered
+        try:
+            await role.edit(colour=gradient_color)
+            embed = discord.Embed(
+                description=f"✅ Your role gradient has been updated from **#{color1.upper()}** to **#{color2.upper()}**!",
+                colour=gradient_color
+            )
+            embed.set_author(name="Role gradient updated!", icon_url=interaction.user.display_avatar.url)
+            embed.set_footer(text="/help for commands list")
+            
+            await interaction.response.send_message(embed=embed)
+
+        except discord.Forbidden:
+            embed = discord.Embed(
+                description="❌ I do not have permission to edit your role!\n"
+                    "Please ask a moderator give me the correct permission/",
+                    colour=0xff0000
+                )
+            embed.set_author(name="Error: Permission denied!")
+            embed.set_footer(text="/help for commands list")
+            
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+
+tree.add_command(role_group)
+
+@bot.event
+async def on_ready():
+    try:
+        print("\nRegistered app commands:")
+        for cmd in tree.get_commands():
+            print(f"- {cmd.name} ({type(cmd)})")
+
+        for guild_id in GUILD_IDS:
+            guild = discord.Object(id=guild_id)
+            await tree.sync(guild=guild)
+            print(f"Slash commands synced instantly to guilds {guild_id}")
+        
+        await tree.sync()
+        print(f"Slash commands synced globally ({len(tree.get_commands())} total)\n")
+
+    except Exception as e:
+        print(f"Error syncing commands: {e}")
+
+    print("\n[ SEMIU IS ONLINE ]\n")
 
 @bot.event
 async def on_guild_join(guild):
@@ -49,567 +577,5 @@ async def on_guild_join(guild):
         if channel.permissions_for(guild.me).send_messages:
             await channel.send("Semiu on duty 👓🫡")
             break
-
-@tree.command()
-async def hello(interaction: discord.Interaction):
-    await interaction.response.send_message(f'Hello {interaction.user.display_name}! 👋')
-
-@bot.remove_command("help")
-
-@bot.command()
-async def help(ctx):
-    embed = discord.Embed(
-    description=
-    "> * Use `s!role claim <name>` to claim a custom role\n"
-    "> * Use `s!role name <name>` to change the role name\n"
-    "> * Use `s!role color <hex color>` to change the role color\n"
-    "> * Use `s!role gradient <hex color> <hex color>` to change the role color to a gradient\n"
-    "> * Use `s!role delete` to delete your custom role\n"
-    "> * Use `s!role icon <image>` to change the role icon",
-    colour=0xca7648
-    )
-    embed.set_author(name="Here is the commands list", icon_url=ctx.author.display_avatar.url)
-    embed.set_footer(text="s!help for commands list")
-    
-    await ctx.send(embed=embed)
-
-@bot.group()
-async def role(ctx):
-    if ctx.invoked_subcommand is None:
-        embed = discord.Embed(
-        description=
-        "> * Use `s!role claim <name>` to claim a custom role\n"
-        "> * Use `s!role name <name>` to change the role name\n"
-        "> * Use `s!role color <hex color>` to change the role color\n"
-        "> * Use `s!role gradient <hex color> <hex color>` to change the role color to a gradient\n"
-        "> * Use `s!role delete` to delete your custom role\n"
-        "> * Use `s!role icon <image>` to change the role icon",
-        colour=0xca7648
-        )
-        embed.set_author(name="Here is the commands list for s!role", icon_url=ctx.author.display_avatar.url)
-        embed.set_footer(text="s!help for commands list")
-    
-        await ctx.send(embed=embed)
-
-### DEV OVERRIDE
-TESTER_ID = 393891661349912586
-
-@role.command()
-async def claim(ctx, *, role_name: str = None):
-    guild = ctx.guild
-    member = ctx.author
-
-    ### CHECK IF MEMBER IS A SERVER BOOSTER
-    if not member.premium_since and member.id !=TESTER_ID:
-        embed = discord.Embed(
-            description="❌ You need to be a **Server Booster** to claim a custom role!",
-            colour=0xff0000
-        )
-        embed.set_author(name="Server boost Required")
-        embed.set_footer(text="Boost the server to claim your custom role")
-        await ctx.send(embed=embed)
-        return
-
-    if role_name is None:
-        role_name = f"{member.display_name}'s Role"
-
-    c.execute("SELECT role_id FROM roles WHERE user_id = ?", (member.id,))
-    result = c.fetchone()
-
-    ### Check database for existing role
-    if result:
-        existing_role = guild.get_role(result[0])
-        if existing_role:
-            embed = discord.Embed(
-                #title=" Custom role already claimed!",
-                description=f"❌ You already have a custom role: @{existing_role.name}\n"
-                "> * Use `s!role name <name>` to change the role name\n"
-                "> * Use `s!role color <hex color>` to change the role color\n"
-                "> * Use `s!role gradient <hex color> <hex color>` to change the role color to a gradient\n"
-                "> * Use `s!role delete` to delete your custom role\n"
-                "> * Use `s!role icon <image>` to change the role icon",
-                colour=0xff0000
-            )
-            embed.set_author(name="ERROR: Custom role already claimed!")
-            embed.set_footer(text="s!help for commands list")
-    
-            await ctx.send(embed=embed)
-            return
-        else:
-            # User does not have role, delete from database
-            c.execute("DELETE FROM roles WHERE user_id = ?", (member.id,))
-            conn.commit()
-
-    ### Create role
-    new_role = await guild.create_role(
-        name=role_name,
-        colour=discord.Color.random(),
-        hoist=False,
-        mentionable=False
-    )
-
-    ### WILL LOOK FOR A ROLE CALLED "SERVER BOOSTER". WILL NOT WORK WITH OTHER ROLE NAMES. KEEP IN MIND.
-    booster_role = discord.utils.find(
-        lambda r: "server booster" in r.name.lower(),
-        guild.roles
-    )
-
-    if booster_role:
-        try:
-            await guild.fetch_roles()
-            target_position = min(booster_role.position+1, guild.me.top_role.position-1)
-            await new_role.edit(position=target_position)
-        except discord.Forbidden:
-            print("`ERROR: NO PERMISSION TO MOVE ROLE. GRANT RELEVANT PERMISSIONS.`")
-    else:
-        print('`NO SERVER BOOSTER ROLE FOUND. SERVER BOOSTER ROLE REQUIRED. OTHERWISE TRY RENAMING THE SERVER BOOSTER ROLE `"Server Booster"')
-
-    ### Give role to member
-    await member.add_roles(new_role)
-
-    ### Store role in database
-
-    c.execute(
-        "INSERT INTO roles (user_id, guild_id, role_id, role_name) VALUES (?, ?, ?, ?)",
-        (member.id, guild.id, new_role.id, new_role.name)
-    )
-    conn.commit()
-
-    ### Claim message
-    embed = discord.Embed(
-        #title="Custom role claimed!",
-        description=f"Thank you for boosting **{guild.name}**, {ctx.author.display_name}!\n"
-        "Here is your own custom role! 🎉\n"
-        "> * Use `s!role name <name>` to change the role name\n"
-        "> * Use `s!role color <hex color>` to change the role color\n"
-        "> * Use `s!role gradient <hex color> <hex color>` to change the role color to a gradient\n"
-        "> * Use `s!role delete` to delete your custom role\n"
-        "> * Use `s!role icon <image>` to change the role icon",
-        colour=0xca7648
-    )
-    embed.set_author(name=f"{ctx.author.display_name} has claimed a custom role!", icon_url=ctx.author.display_avatar.url)
-    embed.set_footer(text="s!help for commands list")
-    
-    await ctx.send(embed=embed)
-
-@role.command()
-async def delete(ctx):
-    guild = ctx.guild
-    member = ctx.author
-
-    ### Look up the role in database
-    c.execute("SELECT role_id FROM roles WHERE user_id = ?", (member.id,))
-    result = c.fetchone()
-
-    ### No custom role detected
-    if not result:
-            embed = discord.Embed(
-            description="❌ No custom role was detected\n"
-                "> * Use `s!role claim <name>` to claim a custom role!",
-                colour=0xff0000
-            )
-            embed.set_author(name="ERROR: No custom role detected!")
-            embed.set_footer(text="s!help for commands list")
-            await ctx.send(embed=embed)
-            return
-     
-    ### role exists
-    role_id = result[0]
-    role = guild.get_role(role_id)
-
-    if role:
-        try:
-            await member.remove_roles(role)
-            await role.delete()
-            embed = discord.Embed(
-                description=f'Your custom role "{role.name}", has been successfully deleted!\n'
-                "> * Use `s!role claim <name>` to claim a new custom role",
-                colour=0x00ff00
-            )
-            embed.set_author(name="Role successfully deleted!", icon_url=ctx.author.display_avatar.url)
-            embed.set_footer(text="s!help for commands list")
-            c.execute("DELETE FROM roles WHERE user_id = ?", (member.id,))
-            conn.commit()
-    
-            await ctx.send(embed=embed)
-        except discord.Forbidden:
-            embed = discord.Embed(
-                description="❌ I do not have permission to edit your role!\n"
-                "Please ask a moderator give me the correct permissions!",
-                colour=0xff0000
-            )
-            embed.set_author(name="Error: Permission denied!")
-            embed.set_footer(text="s!help for commands list")
-    
-            await ctx.send(embed=embed)
-        except discord.HTTPException:
-            embed = discord.Embed(
-                description="❌ Your role could not be deleted, please try again later",
-                colour=0xff0000
-            )
-            embed.set_author(name="Error: HTTP ERROR")
-            embed.set_footer(text="s!help for commands list")
-    
-            await ctx.send(embed=embed)
-    
-    else:
-        embed = discord.Embed(
-                description="❌ Your role was already deleted manually\n"
-                "> * Use `s!role claim <name>` to claim a new custom role",
-                colour=0xff0000
-            )
-        embed.set_author(name="Role was already deleted!", icon_url=ctx.author.display_avatar.url)
-        embed.set_footer(text="s!help for commands list")
-    
-        await ctx.send(embed=embed)
-        c.execute("DELETE FROM roles WHERE user_id = ?", (member.id,))
-        conn.commit()
-
-@role.command()
-async def name(ctx, *, new_name: str):
-    member = ctx.author
-    guild = ctx.guild
-     
-    ### Look up the role in database
-    c.execute("SELECT role_id FROM roles WHERE user_id = ?", (member.id,))
-    result = c.fetchone()
-
-    ### No custom role detected
-    if not result:
-            embed = discord.Embed(
-            description="❌ No custom role was detected\n"
-                "> * Use `s!role claim <name>` to claim a custom role!",
-                colour=0xff0000
-            )
-            embed.set_author(name="ERROR: No custom role detected!")
-            embed.set_footer(text="s!help for commands list")
-            await ctx.send(embed=embed)
-            return
-    
-    role = guild.get_role(result[0])
-    if not role:
-        ### Role was deleted manually, clean database
-        c.execute("DELETE FROM roles WHERE user_id = ?", (member.id,))
-        conn.commit()
-        embed = discord.Embed(
-            description="❌ Your custom role no longer exists.\n> * Use `s!role claim <name>` to claim a new one.",
-            colour=0xff0000
-        )
-        embed.set_author(name="ERROR: Role not found!")
-        embed.set_footer(text="s!help for commands list")
-        await ctx.send(embed=embed)
-        return
-    
-    ### change role name
-    try:
-        await role.edit(name=new_name)
-        c.execute("UPDATE roles SET role_name = ? WHERE user_id = ?", (new_name, member.id))
-        conn.commit()
-        embed = discord.Embed(
-            description=f"✅ Your role name has been updated to **{new_name}**!",
-            colour=0xca7648
-        )
-        embed.set_author(name="Role name updated!", icon_url=ctx.author.display_avatar.url)
-        embed.set_footer(text="s!help for commands list")
-        await ctx.send(embed=embed)
-        
-    except discord.Forbidden:
-        embed = discord.Embed(
-            description="❌ I do not have permission to edit your role!\n"
-            "Please ask a moderator give me the correct permissions!",
-            colour=0xff0000
-        )
-        embed.set_author(name="ERROR: Permission denied!")
-        embed.set_footer(text="s!help for commands list")
-        await ctx.send(embed=embed)
-
-@role.command()
-async def color(ctx, hex_color: str):
-    member = ctx.author
-    guild = ctx.guild
-
-    ### Look up the role in database
-    c.execute("SELECT role_id FROM roles WHERE user_id = ?", (member.id,))
-    result = c.fetchone()
-
-    ### No custom role detected
-    if not result:
-            embed = discord.Embed(
-            description="❌ No custom role was detected\n"
-                "> * Use `s!role claim <name>` to claim a custom role!",
-                colour=0xff0000
-            )
-            embed.set_author(name="ERROR: No custom role detected!")
-            embed.set_footer(text="s!help for commands list")
-            await ctx.send(embed=embed)
-            return
-    
-    role = guild.get_role(result[0])
-    if not role:
-        ### Role was deleted manually, clean database
-        c.execute("DELETE FROM roles WHERE user_id = ?", (member.id,))
-        conn.commit()
-        embed = discord.Embed(
-            description="❌ Your custom role no longer exists.\n> * Use `s!role claim <name>` to claim a new one.",
-            colour=0xff0000
-        )
-        embed.set_author(name="ERROR: Role not found!")
-        embed.set_footer(text="s!help for commands list")
-        await ctx.send(embed=embed)
-        return
-     
-### Convert the hex string into a discord.Color
-    try:
-        if hex_color.startswith("#"):
-            hex_color = hex_color[1:]
-        color_value = discord.Color(int(hex_color, 16))
-    except ValueError:
-        embed = discord.Embed(
-            description='❌ Invalid color format! Use the hexadecimal color format.\nIt should look something like "#FF5733".',
-            colour=0xff0000
-        )
-        embed.set_author(name="ERROR: Invalid color format!")
-        embed.set_footer(text="s!help for commands list")
-        await ctx.send(embed=embed)
-        return
-    
-    ### Change role color
-    try:
-        await role.edit(colour=color_value)
-        embed = discord.Embed(
-            description=f"✅ Your role color has been updated to **#{hex_color.upper()}**!",
-            colour=color_value
-        )
-        embed.set_author(name="Role color updated!", icon_url=ctx.author.display_avatar.url)
-        embed.set_footer(text="s!help for commands list")
-        await ctx.send(embed=embed)
-
-    except discord.Forbidden:
-        embed = discord.Embed(
-            description="I do not have permission to edit your role!\n"
-            "Please ask a moderator give me the correct permissions!",
-            colour=0xff0000
-        )
-        embed.set_author(name="ERROR: Permission denied!")
-        embed.set_footer(text="s!help for commands list")
-        await ctx.send(embed=embed)
-
-@role.command()
-async def icon(ctx, image_url: str = None):
-    member = ctx.author
-    guild = ctx.guild
-    
-    ### Check if server is boosted enough
-    if guild.premium_tier < 2:
-        embed = discord.Embed(
-            description="❌ This server must be **boost level 2 or higher** to use role icons.",
-            colour=0xff0000
-        )
-        embed.set_author(name="Cannot set role icon")
-        embed.set_footer(text="s!help for commands list")
-        await ctx.send(embed=embed)
-        return
-
-    ### Look up the role in database
-    c.execute("SELECT role_id FROM roles WHERE user_id = ?", (member.id,))
-    result = c.fetchone()
-
-    ### No custom role detected
-    if not result:
-            embed = discord.Embed(
-            description="❌ No custom role was detected\n"
-                "> * Use `s!role claim <name>` to claim a custom role!",
-                colour=0xff0000
-            )
-            embed.set_author(name="ERROR: No custom role detected!")
-            embed.set_footer(text="s!help for commands list")
-            await ctx.send(embed=embed)
-            return
-    
-    role = guild.get_role(result[0])
-    if not role:
-        ### Role was deleted manually, clean database
-        c.execute("DELETE FROM roles WHERE user_id = ?", (member.id,))
-        conn.commit()
-        embed = discord.Embed(
-            description="❌ Your custom role no longer exists.\n> * Use `s!role claim <name>` to claim a new one.",
-            colour=0xff0000
-        )
-        embed.set_author(name="ERROR: Role not found!")
-        embed.set_footer(text="s!help for commands list")
-        await ctx.send(embed=embed)
-        return
-    
-    ### CHECK IF THERE IS IMAGE
-    if image_url is None:
-        embed = discord.Embed(
-            description="❌ Please provide an image URL or attachment to set as your role icon.",
-            colour=0xff0000
-        )
-        embed.set_author(name="No image provided")
-        embed.set_footer(text="s!help for commands list")
-        await ctx.send(embed=embed)
-        return
-    
-    ### SET IMAGE
-    try:
-        if ctx.message.attachments:
-            image_url = ctx.message.attachments[0].url
-
-            await role.edit(icon=image_url)
-            embed = discord.Embed(
-            description=f"✅ Your role icon has been updated!",
-            colour=0x00ff00
-            )
-            embed.set_author(name="Role icon updated", icon_url=ctx.author.display_avatar.url)
-            embed.set_footer(text="s!help for commands list")
-            await ctx.send(embed=embed)
-
-    except discord.Forbidden:
-        embed = discord.Embed(
-                description="❌ I do not have permission to edit your role!\n"
-                "Please ask a moderator give me the correct permissions!",
-                colour=0xff0000
-            )
-        embed.set_author(name="Error: Permission denied!")
-        embed.set_footer(text="s!help for commands list")
-
-        await ctx.send(embed=embed)
-    
-    except discord.HTTPException:
-            embed = discord.Embed(
-                description="❌ Your role could not be updated. Please make sure the image is valid and try again",
-                colour=0xff0000
-            )
-            embed.set_author(name="Error: HTTP ERROR")
-            embed.set_footer(text="s!help for commands list")
-    
-            await ctx.send(embed=embed)
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(image_url) as resp:
-                if resp.status != 200:
-                    raise ValueError("Failet to fetch image")
-                image_bytes = await resp.read()
-
-        await role.edit(icon=image_bytes)
-        embed = discord.Embed(
-            description="✅ Your role icon has been updated!",
-            colour=0x00ff00
-        )
-        embed.set_author(name="Role icon updated", icon_url=ctx.author.display_avatar.url)
-        embed.set_footer(text="s!help for commands list")
-        await ctx.send(embed=embed)
-
-    except discord.Forbidden:
-        embed = discord.Embed(
-                description="❌ I do not have permission to edit your role!\n"
-                "Please ask a moderator give me the correct permissions!",
-                colour=0xff0000
-            )
-        embed.set_author(name="Error: Permission denied!")
-        embed.set_footer(text="s!help for commands list")
-
-        await ctx.send(embed=embed)
-    
-    except discord.HTTPException:
-            embed = discord.Embed(
-                description="❌ Your role could not be updated. Please make sure the image is valid and try again",
-                colour=0xff0000
-            )
-            embed.set_author(name="Error: HTTP ERROR")
-            embed.set_footer(text="s!help for commands list")
-    
-            await ctx.send(embed=embed)
-
-@role.command()
-async def gradient(ctx, color1: str = None, color2: str = None):
-    member = ctx.author
-    guild = ctx.guild
-    
-    ### Check if server is boosted enough
-    if guild.premium_tier < 2:
-        embed = discord.Embed(
-            description="❌ This server must be **boost level 3 ** to use role gradients.",
-            colour=0xff0000
-        )
-        embed.set_author(name="Cannot set role icon")
-        embed.set_footer(text="s!help for commands list")
-        
-        await ctx.send(embed=embed)
-        return
-
-    ### Look up the role in database
-    c.execute("SELECT role_id FROM roles WHERE user_id = ?", (member.id,))
-    result = c.fetchone()
-
-    ### No custom role detected
-    if not result:
-            embed = discord.Embed(
-            description="❌ No custom role was detected\n"
-                "> * Use `s!role claim <name>` to claim a custom role!",
-                colour=0xff0000
-            )
-            embed.set_author(name="ERROR: No custom role detected!")
-            embed.set_footer(text="s!help for commands list")
-            
-            await ctx.send(embed=embed)
-            return
-    
-    role = guild.get_role(result[0])
-    if not role:
-        ### Role was deleted manually, clean database
-        c.execute("DELETE FROM roles WHERE user_id = ?", (member.id,))
-        conn.commit()
-        embed = discord.Embed(
-            description="❌ Your custom role no longer exists.\n> * Use `s!role claim <name>` to claim a new one.",
-            colour=0xff0000
-        )
-        embed.set_author(name="ERROR: Role not found!")
-        embed.set_footer(text="s!help for commands list")
-        
-        await ctx.send(embed=embed)
-        return
-    
-    ### Convert hex strings to integers
-    try:
-        if color1.startswith("#"): color1 = color1[1:]
-        if color2.startswith("#"): color2 = color2[1:]
-        gradient_color = discord.Color.from_gradient(int(color1, 16), int(color2, 16))
-    except ValueError:
-        embed = discord.Embed(
-            description='❌ Invalid color format! Use the hexadecimal color format.\nIt should look something like "#FF5733".',
-            colour=0xff0000
-        )
-        embed.set_author(name="ERROR: Invalid color format!")
-        embed.set_footer(text="s!help for commands list")
-        
-        await ctx.send(embed=embed)
-        return
-
-    ### change role color to a gradient using the two hexadecimal values that the user has entered
-    try:
-        await role.edit(colour=gradient_color)
-        embed = discord.Embed(
-            description=f"✅ Your role gradient has been updated from **#{color1.upper()}** to **#{color2.upper()}**!",
-            colour=gradient_color
-        )
-        embed.set_author(name="Role gradient updated!", icon_url=ctx.author.display_avatar.url)
-        embed.set_footer(text="s!help for commands list")
-        
-        await ctx.send(embed=embed)
-
-    except discord.Forbidden:
-        embed = discord.Embed(
-            description="❌ I do not have permission to edit your role!\n"
-                "Please ask a moderator give me the correct permissions!",
-                colour=0xff0000
-            )
-        embed.set_author(name="Error: Permission denied!")
-        embed.set_footer(text="s!help for commands list")
-        
-        await ctx.send(embed=embed)
-
 
 bot.run(Token)
