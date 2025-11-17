@@ -1,20 +1,3 @@
-# --- keep-alive web server for Koyeb ---
-from flask import Flask
-import threading
-
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "Bot is alive!"
-
-def run():
-    app.run(host='0.0.0.0', port=8000)
-
-threading.Thread(target=run).start()
-# --- end keep-alive web server ---
-
-### python semiubot.py
 import os
 import discord
 from discord import app_commands
